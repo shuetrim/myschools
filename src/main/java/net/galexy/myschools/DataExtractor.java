@@ -10,6 +10,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
 import org.apache.commons.io.FileUtils;
 
 /**
@@ -25,9 +32,9 @@ public class DataExtractor {
 	}
 	
 	
-	private int maxThreads = 25;
-	public void setMaxThreads(int maxThreads) {
-		this.maxThreads = maxThreads;
+	private  static int maxThreads = 10;
+	public static void setMaxThreads(int maxThreads) {
+		DataExtractor.maxThreads = maxThreads;
 	}
 
 	ExecutorService executorService = new ThreadPoolExecutor(
@@ -102,6 +109,8 @@ public class DataExtractor {
     public boolean run() {
     	
     	if (file == null) return false;
+    	
+    	System.out.println("Writing data to " + file.getAbsolutePath());
     	
 		// Set up band labels.
 		for (int i=1; i<=10; i++) {
@@ -265,47 +274,166 @@ public class DataExtractor {
 	 * Command line execution
 	 * @param args Just one argument, that being the full path and name of the file to be written to.
 	 */
-    public static void main( String[] args )
-    {
+    public static void main( String[] args ) {
     	
-    	if (args.length == 0) {
-    		System.out.println("Include the full path and file name of the file where the downloaded data will be stored.");
-    		return;
-    	}
     	
-    	File file = new File(args[0]);
+    	Options options = new Options();
+
+        Option output = new Option("o", "output", true, "REQUIRED: output CSV file path and file name");
+        output.setRequired(true);
+        options.addOption(output);
+
+        Option year = new Option("y", "year", true, "OPTIONAL calendar year (yyyy format)");
+        year.setRequired(false);
+        options.addOption(year);
+
+        Option yearGroup = new Option("c", "class", true, "OPTIONAL class (3, 5, 7, or 9)");
+        yearGroup.setRequired(false);
+        options.addOption(yearGroup);
+
+        Option test = new Option("e", "exam", true, "OPTIONAL exam (numeracy, reading, writing, spelling, or grammar)");
+        test.setRequired(false);
+        options.addOption(test);
+
+        Option school = new Option("s", "school", true, "OPTIONAL school ID 5 digit number at or above 40000 (and in 2017 below 50730)");
+        school.setRequired(false);
+        options.addOption(school);
+
+        Option threads = new Option("t", "threads", true, "OPTIONAL maximum number of parallel threads to use to do the extraction.");
+        threads.setRequired(false);
+        options.addOption(threads);
+
+        CommandLineParser parser = new DefaultParser();
+        CommandLine cmd = null;
+
+        try {
+            cmd = parser.parse(options, args);
+        } catch (ParseException e) {
+        	reportProblem("Problem with the command line arguments: " + e.getMessage(), options);
+        }
+        
+
+        String outputFilePath = cmd.getOptionValue("output");
+
+    	File file = new File(outputFilePath);
     	
-    	if (! file.getParentFile().exists()) {
-        	if (!file.mkdirs()) {
-        		System.out.println("Could not create folder for " + file + ".");
-        		return;
-        	}
-    	}
+//    	File parentFile = file.getParentFile();
+//    	if (parentFile == null) {
+//        	reportProblem(file.getAbsolutePath() + " has no parent directory.", options);
+//    	}
+    	
+//    	if (! file.getParentFile().exists()) {
+//        	if (!file.mkdirs()) {
+//            	reportProblem("Could not create folder for " + file + ".", options);
+//        	}
+//    	}
 
     	if (!file.exists()) {
     		try {
         		if (!file.createNewFile() || !file.delete()) {
-            		System.out.println("Cannot write to " + file + ".");
-            		return;
+                	reportProblem("Could not write to " + file + ".", options);
         		}
     		} catch (IOException e) {
-    			System.out.println("Cannot write to " + file + ".");
-        		return;
+            	reportProblem("IO problem with " + file + ". " + e.getMessage(), options);
     		}
     	}
     	
     	if (file.exists() && !file.delete()) {
-    		System.out.println("Unable to delete a pre-existing old version of " + file + ".");
-    		return;
+        	reportProblem("Unable to delete " + file + ".", options);
     	}
 
-//    	if (! file.canWrite()) {
-//    		System.out.println("Unable to update " + file + ".");
-//    		return;
-//    	}
-    	
-    	new DataExtractor(file).run();
-    	return;
+    	if (cmd.hasOption("year")) {
+        	String myYear = cmd.getOptionValue("year");
+        	try {
+        		Integer[] myYears = { Integer.valueOf(myYear) };
+        		if (myYears[0] < 2010) {
+                	reportProblem("Data is not available before 2010.", options);
+        		}
+        		DataExtractor.setYears(myYears);
+        	} catch (Exception e) {
+            	reportProblem("The year must be a 4 digit number above 2010.", options);
+        	}
+    	}
 
+    	if (cmd.hasOption("class")) {
+        	String myClass = cmd.getOptionValue("class");
+        	try {
+        		Integer[] myClasses = { Integer.valueOf(myClass) };
+        		if (myClasses[0] != 3 && myClasses[0] != 5 && myClasses[0] != 7 && myClasses[0] != 9) {
+                	reportProblem("The class must be one of 3, 5, 7, or 9.", options);
+        		}
+        		DataExtractor.setYearGroups(myClasses);
+        	} catch (Exception e) {
+            	reportProblem("The class must be one of 3, 5, 7, or 9. " + e.getMessage(), options);
+        	}
+    	}
+
+    	if (cmd.hasOption("test")) {
+        	String myTest = cmd.getOptionValue("test");
+        	Integer testChoice = null;
+        	switch (myTest) {
+        	case "numeracy":
+        		testChoice = DOMAIN_NUMERACY;
+        		break;
+        	case "reading":
+        		testChoice = DOMAIN_READING;
+        		break;
+        	case "writing":
+        		testChoice = DOMAIN_WRITING;
+        		break;
+        	case "spelling":
+        		testChoice = DOMAIN_SPELLING;
+        		break;
+        	case "grammar":
+        		testChoice = DOMAIN_GRAMMAR;
+        		break;
+        	default:
+            	reportProblem("The test must be one of numeracy, reading, writing, spelling, or grammar.", options);
+        	}
+        	Integer[] myDomains = {testChoice};
+        	DataExtractor.setDomains(myDomains);
+    	}
+    	
+    	if (cmd.hasOption("school")) {
+        	String mySchool = cmd.getOptionValue("school");
+        	try {
+        		Integer chosenSchool = Integer.valueOf(mySchool);
+        		if (chosenSchool < 40000) {
+                	reportProblem("No school IDs below 40000.", options);
+        		}
+        		DataExtractor.MIN_SCHOOL_ID = chosenSchool;
+        		DataExtractor.MAX_SCHOOL_ID = chosenSchool;
+        	} catch (Exception e) {
+            	reportProblem("The school must be a 5 digit number above 40000.", options);
+        	}
+    	}
+
+    	if (cmd.hasOption("threads")) {
+        	String myThreads = cmd.getOptionValue("threads");
+        	try {
+        		Integer myThreadCount = Integer.valueOf(myThreads);
+        		if (myThreadCount < 1) {
+                	reportProblem("Thread count must be positive.", options);
+        		}
+        		if (myThreadCount > 100) {
+                	System.out.println("Thread counts above 100 tend to be challenging for the computer.");
+        		}
+        		DataExtractor.setMaxThreads(myThreadCount);
+        	} catch (Exception e) {
+            	reportProblem("Thread count problem. " + e.getMessage(), options);
+        	}
+    	}
+    	DataExtractor extractor = new DataExtractor(file);
+    	extractor.run();
+    	
+    	System.exit(0);
+    	
+    }
+    
+    private static void reportProblem(String message, Options options) {
+        System.out.println(message);
+        HelpFormatter formatter = new HelpFormatter();
+        formatter.printHelp("utility-name", options);
+        System.exit(1);
     }
 }
